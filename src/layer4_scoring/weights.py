@@ -23,7 +23,7 @@ class ScoringWeights:
 
 
 MAX_SCORE = 100.0
-SCALE_FACTOR = 100.0
+SCALE_FACTOR = 88.0  # Tuned so top items score ~95, not all 100
 
 SCHEDULE_THRESHOLDS = {
     "High": 1.05,
