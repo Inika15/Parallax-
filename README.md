@@ -18,3 +18,64 @@ Our system uses a **6-layer architecture** with **joint 48-combination optimizat
 **POST_NOW vs SCHEDULE:** Time-sensitivity-aware thresholds (High=1.05×, Medium=1.10×, Low=1.20×). If optimal score exceeds current-slot score by the threshold, SCHEDULE. Submission at/near optimal slot → POST_NOW. Cooldown-aware batch scheduling prevents per-creator slot conflicts.
 
 **Note:** Please do not change the format or spelling of anything in this README. The fields are extracted using a script, so any changes to the structure or formatting may break the extraction process.
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| **Backend Engine** | Python 3.11 |
+| **API Server** | FastAPI + Uvicorn |
+| **Frontend** | React 18 + Vite |
+| **Data Processing** | Pandas, NumPy |
+| **Visualization** | Recharts (frontend charts) |
+
+## Dependencies
+
+```
+fastapi
+uvicorn
+pandas
+numpy
+```
+
+Frontend (managed via npm):
+```
+react, react-dom, react-router-dom
+recharts, lucide-react
+vite
+```
+
+## How to Use
+
+### 1. Run the Optimization Pipeline
+```bash
+pip install -r requirements.txt
+python main.py --data-dir data/raw --output results/recommendations.json
+```
+This processes all 100 content items through the 6-layer engine and outputs scored recommendations.
+
+### 2. Start the API Server
+```bash
+python api.py
+```
+API runs at `http://localhost:8000` — Swagger docs at `http://localhost:8000/docs`
+
+### 3. Launch the Frontend Dashboard
+```bash
+cd frontend
+npm install
+npm run dev
+```
+Dashboard runs at `http://localhost:5173` with:
+- **Dashboard** — Recommendations table, score bars, heatmap
+- **Optimize** — Run optimization for specific creators
+- **Schedule** — Drag-and-drop calendar with score-delta tooltips
+- **Creators** — Individual creator profiles and DNA analysis
+- **Analytics** — Platform comparison charts and engagement trends
+
+### Quick Start (Windows)
+```bash
+run.bat
+```
