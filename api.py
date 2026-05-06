@@ -80,48 +80,37 @@ for cid, profile in creators.items():
         )
     dna_profiles[cid] = dna
 
-# Pre-compute all recommendations
-all_recommendations = []
-for item_id in sorted(content.keys(), key=lambda x: int(x)):
-    item = content[item_id]
-    dna = dna_profiles.get(item.creator_id)
-    if not dna:
-        dna = build_cold_start_profile(
-            item.creator_id, 1.0, 4,
-            context.all_platforms, context.all_content_types,
-            global_type_avg, global_peak_slots,
-        )
+# Pre-compute all recommendations using the SAME engine as main.py
+# This ensures frontend sees identical scores to the CLI pipeline
+RESULTS_FILE = os.path.join(ROOT_DIR, "results", "recommendations.json")
 
-    best = joint_optimize(item.content_id, item.creator_id, item.content_type, dna, context)
-    sched = decide_schedule(
-        item.creator_id, item.content_type, item.created_timestamp,
-        best.platform, best.recommended_slot, best.score,
-        item.time_sensitivity, context,
-    )
+def _load_or_compute_recommendations():
+    """Load recommendations from main.py's output, or run pipeline if missing."""
+    if os.path.exists(RESULTS_FILE):
+        with open(RESULTS_FILE, "r", encoding="utf-8") as f:
+            recs = json.load(f)
+        # Enrich with content metadata for the API
+        enriched = []
+        for rec in recs:
+            cid = str(rec["content_id"])
+            item = content.get(cid)
+            enriched.append({
+                **rec,
+                "creator_id": item.creator_id if item else "?",
+                "content_type": item.content_type if item else "?",
+                "submission_hour": item.created_timestamp if item else 0,
+                "time_sensitivity": item.time_sensitivity if item else "Medium",
+            })
+        return enriched
+    else:
+        # Fallback: run main.py pipeline
+        logger.warning("results/recommendations.json not found — running pipeline...")
+        import subprocess
+        subprocess.run([sys.executable, "main.py", "--data-dir", DATA_DIR,
+                       "--output", RESULTS_FILE], cwd=str(ROOT_DIR), check=True)
+        return _load_or_compute_recommendations()
 
-    rec = {
-        "content_id": item.content_id,
-        "creator_id": item.creator_id,
-        "content_type": item.content_type,
-        "submission_hour": item.created_timestamp,
-        "time_sensitivity": item.time_sensitivity,
-        "platform": best.platform,
-        "recommended_slot": best.recommended_slot,
-        "decision": sched["decision"],
-        "score": best.score,
-        "confidence": best.confidence,
-        "explanation": {
-            "platform_activity": best.breakdown["platform_activity_raw"],
-            "creator_history_score": best.breakdown["creator_history_raw"],
-            "creator_base": best.breakdown["creator_base_raw"],
-            "content_fit": best.breakdown["content_fit_raw"],
-            "current_slot_score": sched["current_slot_score"],
-            "optimal_slot_score": sched["optimal_slot_score"],
-            "schedule_threshold_met": sched["threshold_met"],
-        },
-    }
-    all_recommendations.append(rec)
-
+all_recommendations = _load_or_compute_recommendations()
 metrics = compute_eval_metrics(all_recommendations, context)
 logger.info(f"Loaded {len(all_recommendations)} recommendations. Composite: {metrics['composite_score']:.4f}")
 
@@ -131,6 +120,7 @@ app = FastAPI(title="PostOptima API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

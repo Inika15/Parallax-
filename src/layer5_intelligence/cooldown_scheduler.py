@@ -106,9 +106,9 @@ def joint_optimize_with_cooldown(
             velocity_bonus = compute_first_hour_velocity_bonus(submission_hour, slot)
             routing_label = get_sensitivity_routing_label(time_sensitivity, pa)
 
-            # Adjust score: subtract risk, add velocity bonus
+            # Adjust score: subtract risk, add velocity bonus, cap at 100
             adjusted_score = round(
-                max(0.0, base_score * (1.0 - risk_penalty) + velocity_bonus * 100),
+                min(100.0, max(0.0, base_score * (1.0 - risk_penalty) + velocity_bonus * 100)),
                 2,
             )
 

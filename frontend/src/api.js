@@ -4,10 +4,13 @@ const API = 'http://localhost:8000';
 async function safeFetch(url, options = {}) {
   try {
     const res = await fetch(url, options);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) {
+      console.error(`API Error: ${res.status} for ${url}`);
+      return null;
+    }
     return await res.json();
   } catch (err) {
-    console.error(`API error: ${url}`, err);
+    console.error(`Fetch failed for ${url}:`, err.message);
     return null;
   }
 }
@@ -21,7 +24,8 @@ export async function fetchStats() {
 }
 
 export async function fetchRecommendations(limit = 100) {
-  return safeFetch(`${API}/api/recommendations?limit=${limit}`);
+  const data = await safeFetch(`${API}/api/recommendations?limit=${limit}`);
+  return data || [];
 }
 
 export async function fetchHeatmap() {
@@ -29,7 +33,8 @@ export async function fetchHeatmap() {
 }
 
 export async function fetchCreators() {
-  return safeFetch(`${API}/api/creators`) || [];
+  const data = await safeFetch(`${API}/api/creators`);
+  return data || [];
 }
 
 export async function fetchCreator(id) {
@@ -41,11 +46,17 @@ export async function fetchCreatorHeatmap(id, contentType = 'SHORT') {
 }
 
 export async function runOptimizer(data) {
-  return safeFetch(`${API}/api/optimize`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  });
+  try {
+    const res = await fetch(`${API}/api/optimize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    return await res.json();
+  } catch (err) {
+    console.error('Optimizer failed:', err.message);
+    return { error: err.message };
+  }
 }
 
 export async function fetchCounterfactual(contentId) {
@@ -67,7 +78,8 @@ export async function fetchAnalyticsPlatformBreakdown(creatorId) {
 }
 
 export async function fetchAnalyticsContentHistory(creatorId) {
-  return safeFetch(`${API}/api/analytics/content-history/${creatorId}`) || [];
+  const data = await safeFetch(`${API}/api/analytics/content-history/${creatorId}`);
+  return data || [];
 }
 
 export async function fetchAnalyticsTimingAudit(creatorId) {
