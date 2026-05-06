@@ -39,7 +39,7 @@ from src.layer3_personalization.cold_start import (
     COLD_START_THRESHOLD,
 )
 from src.layer4_scoring.weights import DEFAULT_WEIGHTS
-from src.layer5_intelligence.optimizer import joint_optimize
+from src.layer5_intelligence.optimizer import joint_optimize, joint_optimize_with_cooldown
 from src.layer5_intelligence.scheduler import decide_schedule
 from src.layer6_output.output_formatter import (
     format_recommendation,
@@ -114,6 +114,11 @@ def run_pipeline(data_dir: str, output_path: str, verbose: bool = False):
     t_load = time.perf_counter()
     print(f"   ✅ Loaded in {(t_load - t_start)*1000:.0f}ms")
 
+    # Log scoring configuration
+    from src.layer4_scoring.weights import DEFAULT_WEIGHTS
+    print(f"   ⚙️  Weights: PA={DEFAULT_WEIGHTS.w_platform_activity} CH={DEFAULT_WEIGHTS.w_creator_history} "
+          f"CB={DEFAULT_WEIGHTS.w_creator_base} CF={DEFAULT_WEIGHTS.w_content_fit}")
+
     # ── LAYER 2: Fuse Data ───────────────────────────────────────────
     print("🔗 Layer 2: Building EngagementContext...")
     fallback = FallbackRegistry()
@@ -166,8 +171,9 @@ def run_pipeline(data_dir: str, output_path: str, verbose: bool = False):
     print_dashboard(context, dna_profiles)
 
     # ── LAYERS 4+5: Score + Optimize + Schedule ──────────────────────
-    print("🧠 Layers 4-5: Scoring & Optimizing...")
+    print("🧠 Layers 4-5: Scoring & Optimizing (with cooldown enforcement)...")
     recommendations = []
+    occupied_slots = {}  # creator_id → set of (platform, slot) for cooldown tracking
 
     for item_id in sorted(content.keys(), key=lambda x: int(x)):  # deterministic order
         item = content[item_id]
@@ -187,14 +193,20 @@ def run_pipeline(data_dir: str, output_path: str, verbose: bool = False):
                 global_peak_slots=global_peak_slots,
             )
 
-        # Joint optimization
-        best = joint_optimize(
+        # Joint optimization with cooldown constraint enforcement
+        best = joint_optimize_with_cooldown(
             content_id=item.content_id,
             creator_id=item.creator_id,
             content_type=item.content_type,
             creator_dna=dna,
             context=context,
+            occupied_slots=occupied_slots,
         )
+
+        # Track occupied slot for this creator's cooldown window
+        if item.creator_id not in occupied_slots:
+            occupied_slots[item.creator_id] = set()
+        occupied_slots[item.creator_id].add((best.platform, best.recommended_slot))
 
         # Scheduling decision
         schedule_result = decide_schedule(
@@ -269,6 +281,8 @@ def run_pipeline(data_dir: str, output_path: str, verbose: bool = False):
     print(f"     Composite Score:      {metrics['composite_score']:.4f}")
     print(f"\n  ⏱️  Total pipeline time:  {(t_end - t_start)*1000:.0f}ms")
     print(f"  💾 Output written to:    {output_path}")
+    print("=" * 60)
+    print(f"\n  🎯 COMPOSITE SCORE: {metrics['composite_score']:.4f}")
     print("=" * 60 + "\n")
 
     # Save metrics

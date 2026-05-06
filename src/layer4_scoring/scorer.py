@@ -5,7 +5,15 @@ Issues: #5, #17, #18
 Multiplicative scoring: a zero on ANY factor tanks the score.
 This is correct because e.g. zero platform activity = don't post there.
 
-SCORE = platform_activity^W1 × creator_history^W2 × base_engagement^W3 × content_affinity^W4
+Formula:
+    SCORE = platform_activity^W1 × creator_history^W2 × base_engagement^W3 × content_affinity^W4 × SCALE
+
+Why multiplicative (not additive):
+    - Zero on any factor → zero score (correct: dead slot = no post)
+    - Additive would let a strong creator compensate for a dead time slot — wrong
+    - Weights act as elasticities (exponents), not linear coefficients
+    - Product is scale-independent before SCALE_FACTOR
+
 Scaled to 0–100.
 """
 
@@ -40,7 +48,13 @@ def compute_score(
     if platform_activity <= 0.0 or creator_history <= 0.0 or creator_base <= 0.0 or content_fit <= 0.0:
         return 0.0
 
-    # Multiplicative weighted product
+    # Multiplicative geometric scoring:
+    # Each factor is raised to its weight power, then multiplied.
+    # This ensures:
+    # - Zero on any factor → zero score (correct: dead slot = no post)
+    # - Weights act as elasticities, not linear coefficients
+    # - e.g. PA=1.0^0.30 = 1.0, PA=0.6^0.30 ≈ 0.85 → modest penalty for off-peak
+    # - e.g. CH=0.3^0.40 ≈ 0.60 → heavy penalty for poor creator history
     raw = (
         (platform_activity ** weights.w_platform_activity)
         * (creator_history ** weights.w_creator_history)

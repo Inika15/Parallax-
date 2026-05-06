@@ -14,14 +14,16 @@ export default function Analytics() {
   const [sortField, setSortField] = useState('score')
   const [sortDir, setSortDir] = useState('desc')
 
-  useEffect(() => { fetchCreators().then(c => { setCreators(c); if (c.length) setSelectedCreator(c[0].creator_id) }) }, [])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => { fetchCreators().then(c => { setCreators(c || []); if (c?.length) setSelectedCreator(c[0].creator_id); setLoading(false) }) }, [])
 
   useEffect(() => {
     if (!selectedCreator) return
     fetchAnalyticsScorecard(selectedCreator).then(setScorecard)
     fetchAnalyticsHeatmap(selectedCreator).then(setHeatmap)
     fetchAnalyticsPlatformBreakdown(selectedCreator).then(setBreakdown)
-    fetchAnalyticsContentHistory(selectedCreator).then(setContentHistory)
+    fetchAnalyticsContentHistory(selectedCreator).then(d => setContentHistory(d || []))
     fetchAnalyticsTimingAudit(selectedCreator).then(setTimingAudit)
     fetchAnalyticsOptimizerImpact(selectedCreator).then(setImpact)
   }, [selectedCreator])
@@ -37,6 +39,12 @@ export default function Analytics() {
     if (sortField === field) setSortDir(d => d === 'desc' ? 'asc' : 'desc')
     else { setSortField(field); setSortDir('desc') }
   }
+
+  if (loading) return (
+    <div className="page" style={{ textAlign: 'center', padding: 80 }}>
+      <div style={{ fontSize: '1.5rem', color: 'var(--text-hint)', animation: 'pulse 1.5s infinite' }}>⏳ Loading analytics...</div>
+    </div>
+  )
 
   return (
     <div className="page">

@@ -7,8 +7,9 @@ const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 export default function Schedule() {
   const [recs, setRecs] = useState([])
   const [hovered, setHovered] = useState(null)
+  const [loading, setLoading] = useState(true)
 
-  useEffect(() => { fetchRecommendations(100).then(setRecs) }, [])
+  useEffect(() => { fetchRecommendations(100).then(r => { setRecs(r || []); setLoading(false) }) }, [])
 
   // Distribute recs across days (round-robin by content_id)
   const grid = {}
@@ -31,6 +32,12 @@ export default function Schedule() {
 
   const igCount = recs.filter(r => r.platform === 'Instagram').length
   const ytCount = recs.filter(r => r.platform === 'YouTube').length
+
+  if (loading) return (
+    <div className="page" style={{ textAlign: 'center', padding: 80 }}>
+      <div style={{ fontSize: '1.5rem', color: 'var(--text-hint)', animation: 'pulse 1.5s infinite' }}>⏳ Loading schedule...</div>
+    </div>
+  )
 
   return (
     <div className="page">

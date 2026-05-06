@@ -6,12 +6,19 @@ import { Badge, ScoreBar } from '../components/Shared'
 export default function Creators() {
   const [creators, setCreators] = useState([])
   const [search, setSearch] = useState('')
+  const [loading, setLoading] = useState(true)
   const navigate = useNavigate()
 
-  useEffect(() => { fetchCreators().then(setCreators) }, [])
+  useEffect(() => { fetchCreators().then(c => { setCreators(c || []); setLoading(false) }) }, [])
 
   const filtered = creators.filter(c =>
     c.creator_id.includes(search) || search === ''
+  )
+
+  if (loading) return (
+    <div className="page" style={{ textAlign: 'center', padding: 80 }}>
+      <div style={{ fontSize: '1.5rem', color: 'var(--text-hint)', animation: 'pulse 1.5s infinite' }}>⏳ Loading creators...</div>
+    </div>
   )
 
   return (

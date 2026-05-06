@@ -6,6 +6,9 @@ dist/
 build/
 .env
 venv/
+.pytest_cache/
+htmlcov/
+.coverage
 
 # Node
 frontend/node_modules/

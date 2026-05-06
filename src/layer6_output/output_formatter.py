@@ -26,6 +26,11 @@ def format_recommendation(
     explanation: dict,
 ) -> Dict[str, Any]:
     """Format a single recommendation into the output schema."""
+    # Compute gain_pct: percentage improvement from current to optimal slot
+    current = explanation.get("current_slot_score", 0)
+    optimal = explanation.get("optimal_slot_score", 0)
+    gain_pct = round(((optimal - current) / current * 100), 1) if current > 0 else 0.0
+
     rec = {
         "content_id": content_id,
         "platform": platform,
@@ -33,6 +38,7 @@ def format_recommendation(
         "decision": decision,
         "score": score,
         "confidence": confidence,
+        "gain_pct": gain_pct,
         "explanation": explanation,
     }
     return rec

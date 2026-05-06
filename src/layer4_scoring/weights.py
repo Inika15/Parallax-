@@ -34,3 +34,4 @@ SCHEDULE_THRESHOLDS = {
 NEAR_SLOT_HOURS = 1
 
 DEFAULT_WEIGHTS = ScoringWeights()
+assert DEFAULT_WEIGHTS.validate(), "Scoring weights must sum to 1.0"

@@ -101,8 +101,9 @@ def _compute_platform_quality(recs: List[Dict], context) -> float:
 
 def _compute_efficiency(recs: List[Dict]) -> float:
     """
-    Ratio of SCHEDULE decisions (scheduling = more efficient use of time).
-    Also factors in whether threshold was meaningfully met.
+    Efficiency: how well does the system choose between POST_NOW and SCHEDULE?
+    - SCHEDULE is efficient if the gain is meaningful (>5% improvement)
+    - POST_NOW is efficient if we're already close to optimal (>=90%)
     """
     if not recs:
         return 0.0
@@ -111,13 +112,15 @@ def _compute_efficiency(recs: List[Dict]) -> float:
     for r in recs:
         explanation = r.get("explanation", {})
         decision = r.get("decision", "POST_NOW")
+        current = explanation.get("current_slot_score", 0)
+        optimal = explanation.get("optimal_slot_score", 0)
 
-        if decision == "SCHEDULE" and explanation.get("threshold_met", False):
-            efficient_count += 1
+        if decision == "SCHEDULE":
+            # Efficient if the gain is meaningful (at least 5% real improvement)
+            if optimal > current * 1.05:
+                efficient_count += 1
         elif decision == "POST_NOW":
             # POST_NOW is efficient if current slot is already near-optimal
-            current = explanation.get("current_slot_score", 0)
-            optimal = explanation.get("optimal_slot_score", 0)
             if optimal > 0 and current / optimal >= 0.9:
                 efficient_count += 1
 

@@ -26,7 +26,11 @@ export default function CreatorProfile() {
     }
   }, [creator])
 
-  if (!creator) return <div className="page"><p>Loading...</p></div>
+  if (!creator) return (
+    <div className="page" style={{ textAlign: 'center', padding: 80 }}>
+      <div style={{ fontSize: '1.5rem', color: 'var(--text-hint)', animation: 'pulse 1.5s infinite' }}>⏳ Loading creator profile...</div>
+    </div>
+  )
 
   return (
     <div className="page">
@@ -169,7 +173,7 @@ export default function CreatorProfile() {
                       <div className="heatmap-label">{platform}</div>
                       {slots.map((s, i) => (
                         <div key={i} className="heatmap-cell"
-                          style={{ background: `rgba(26,26,26, ${maxS > 0 ? (s.score / maxS) * 0.9 : 0.05})` }}
+                          style={{ background: `rgba(15, 110, 86, ${maxS > 0 ? (s.score / maxS) * 0.9 : 0.05})` }}
                           title={`${platform} ${s.hour}:00 — Score: ${s.score}`}
                         />
                       ))}

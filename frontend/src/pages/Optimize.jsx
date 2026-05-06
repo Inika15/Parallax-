@@ -6,9 +6,10 @@ import { Badge, ScoreBar, PipelineFlow } from '../components/Shared'
 export default function Optimize() {
   const [searchParams] = useSearchParams()
   const [creators, setCreators] = useState([])
+  const profile = JSON.parse(localStorage.getItem('postoptima_profile') || '{}')
   const [form, setForm] = useState({
     creator_id: searchParams.get('creator') || '1',
-    content_type: 'SHORT',
+    content_type: profile.contentType === 'long' ? 'LONG' : 'SHORT',
     submission_hour: 12,
     time_sensitivity: 'Medium',
   })
