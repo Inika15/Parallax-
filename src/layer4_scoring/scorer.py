@@ -1,12 +1,18 @@
 """
-Layer 4 — Scoring Engine (MULTIPLICATIVE)
+Layer 4 — Scoring Engine (WEIGHTED SUM)
 Issues: #5, #17, #18
 
-Multiplicative scoring: a zero on ANY factor tanks the score.
-This is correct because e.g. zero platform activity = don't post there.
+From how_to_win.md:
+  "The safest interpretation that matches standard recommendation system literature is:
+   score = (W1 * activity) + (W2 * history) + (W3 * base) + (W4 * affinity)"
 
-SCORE = platform_activity^W1 × creator_history^W2 × base_engagement^W3 × content_affinity^W4
-Scaled to 0–100.
+WEIGHTED SUM scoring — all factors are on comparable 0–1.25 scale.
+Scaled to 0–100 at the end.
+
+W1=0.30 (platform_activity)  — step function: 0.6 or 1.0
+W2=0.40 (creator_history)    — continuous: 0.255–1.250 (dominant term)
+W3=0.15 (base_engagement)    — continuous: 0.61–1.38
+W4=0.15 (content_fit)        — derived: ~0.79–1.21
 """
 
 import logging
@@ -26,26 +32,26 @@ def compute_score(
     weights: ScoringWeights = DEFAULT_WEIGHTS,
 ) -> float:
     """
-    Multiplicative scoring function.
-    
-    SCORE = (pa^w1 * ch^w2 * cb^w3 * cf^w4) * SCALE
-    
-    Edge cases (Issue #17):
+    Weighted sum scoring function.
+
+    SCORE = (W1*pa + W2*ch + W3*cb + W4*cf) * SCALE
+
+    Edge cases (Issue #17, how_to_win.md):
     - Zero platform activity → score = 0.0 (never recommend dead slots)
     - Any factor <= 0 → score = 0.0
     - NaN/Inf → clipped to 0.0
     - Score capped at MAX_SCORE
     """
-    # Dead slot / missing data guard
-    if platform_activity <= 0.0 or creator_history <= 0.0 or creator_base <= 0.0 or content_fit <= 0.0:
+    # Dead slot / missing data guard (how_to_win.md: "zero activity → always score 0.0")
+    if platform_activity <= 0.0:
         return 0.0
 
-    # Multiplicative weighted product
+    # Weighted sum — all factors on comparable scales
     raw = (
-        (platform_activity ** weights.w_platform_activity)
-        * (creator_history ** weights.w_creator_history)
-        * (creator_base ** weights.w_creator_base)
-        * (content_fit ** weights.w_content_fit)
+        weights.w_platform_activity * platform_activity
+        + weights.w_creator_history * creator_history
+        + weights.w_creator_base * creator_base
+        + weights.w_content_fit * content_fit
     )
 
     score = raw * SCALE_FACTOR
@@ -76,8 +82,8 @@ def compute_score_with_breakdown(
         "creator_history_raw": creator_history,
         "creator_base_raw": creator_base,
         "content_fit_raw": content_fit,
-        "w_platform_contribution": round(platform_activity ** weights.w_platform_activity, 4),
-        "w_history_contribution": round(creator_history ** weights.w_creator_history, 4),
-        "w_base_contribution": round(creator_base ** weights.w_creator_base, 4),
-        "w_fit_contribution": round(content_fit ** weights.w_content_fit, 4),
+        "w_platform_contribution": round(weights.w_platform_activity * platform_activity, 4),
+        "w_history_contribution": round(weights.w_creator_history * creator_history, 4),
+        "w_base_contribution": round(weights.w_creator_base * creator_base, 4),
+        "w_fit_contribution": round(weights.w_content_fit * content_fit, 4),
     }
