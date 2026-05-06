@@ -34,7 +34,11 @@ def compute_score(
     """
     Weighted sum scoring function.
 
-    SCORE = (W1*pa + W2*ch + W3*cb + W4*cf) * SCALE
+    SCORE = (W1*pa + W2*ch + W3*cb + W4*cf) / MAX_RAW * 100
+
+    The raw weighted sum ranges from ~0.4 to ~1.2 depending on input
+    quality. We normalize by the theoretical maximum so that only the
+    absolute best input combination scores 100.
 
     Edge cases (Issue #17, how_to_win.md):
     - Zero platform activity → score = 0.0 (never recommend dead slots)
@@ -54,7 +58,16 @@ def compute_score(
         + weights.w_content_fit * content_fit
     )
 
-    score = raw * SCALE_FACTOR
+    # Theoretical max: PA=1.0, CH=1.25, CB=1.38, CF=1.21
+    # max_raw = 0.30*1.0 + 0.40*1.25 + 0.15*1.38 + 0.15*1.21 = 1.1885
+    max_raw = (
+        weights.w_platform_activity * 1.0
+        + weights.w_creator_history * 1.25
+        + weights.w_creator_base * 1.38
+        + weights.w_content_fit * 1.21
+    )
+
+    score = (raw / max_raw) * SCALE_FACTOR
 
     # Sanity guards
     if math.isnan(score) or math.isinf(score):
