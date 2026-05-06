@@ -362,6 +362,271 @@ def counterfactual(content_id: str):
     }
 
 
+
+# ══════════════════════════════════════════════════════════════════════
+# Analytics Endpoints (from analytics_plan.md)
+# ══════════════════════════════════════════════════════════════════════
+
+@app.get("/api/analytics/scorecard/{creator_id}")
+def analytics_scorecard(creator_id: str):
+    """Panel 1 — Creator Scorecard: base engagement, global avg, best platform/type."""
+    profile = creators.get(creator_id)
+    if not profile:
+        return {"error": "Creator not found"}
+
+    # Compute global avg engagement for this creator
+    creator_scores = [v for (cid, _, _, _), v in history.items() if cid == creator_id]
+    global_avg = sum(creator_scores) / len(creator_scores) if creator_scores else 0
+
+    # Best platform
+    platform_avgs = {}
+    for (cid, plat, _, _), v in history.items():
+        if cid == creator_id:
+            platform_avgs.setdefault(plat, []).append(v)
+    best_platform = max(platform_avgs, key=lambda p: sum(platform_avgs[p]) / len(platform_avgs[p])) if platform_avgs else "Unknown"
+
+    # Best content type
+    type_avgs = {}
+    for (cid, _, ct, _), v in history.items():
+        if cid == creator_id:
+            type_avgs.setdefault(ct, []).append(v)
+    best_type = max(type_avgs, key=lambda t: sum(type_avgs[t]) / len(type_avgs[t])) if type_avgs else "Unknown"
+
+    # Total submissions
+    creator_content = [c for c in content.values() if c.creator_id == creator_id]
+
+    # Engagement label
+    be = profile.base_engagement
+    label = "Power Creator" if be > 1.10 else "Average" if be >= 0.80 else "Below Average"
+
+    return {
+        "creator_id": creator_id,
+        "base_engagement": be,
+        "engagement_label": label,
+        "global_avg_engagement": round(global_avg, 3),
+        "best_platform": best_platform,
+        "best_content_type": best_type,
+        "cooldown_hours": profile.cooldown_hours,
+        "total_submissions": len(creator_content),
+    }
+
+
+@app.get("/api/analytics/heatmap/{creator_id}")
+def analytics_heatmap(creator_id: str):
+    """Panel 2 — Personalized Engagement Heatmap: 24 × 2 grid, normalized per creator."""
+    data = {}
+    all_scores = []
+
+    for platform in sorted(context.all_platforms):
+        slots = []
+        for hour in range(24):
+            # Average across content types
+            scores_for_slot = []
+            for ct in context.all_content_types:
+                val = history.get((creator_id, platform, ct, hour), 0)
+                if val > 0:
+                    scores_for_slot.append(val)
+            avg = sum(scores_for_slot) / len(scores_for_slot) if scores_for_slot else 0
+            is_peak = context.get_platform_activity(platform, hour) >= 1.0
+            slots.append({"hour": hour, "score": round(avg, 3), "is_peak": is_peak})
+            all_scores.append(avg)
+        data[platform] = slots
+
+    # Find personal peak
+    global_min = min(all_scores) if all_scores else 0
+    global_max = max(all_scores) if all_scores else 1
+    best_slot = None
+    best_score = -1
+    for plat, slots in data.items():
+        for s in slots:
+            if s["score"] > best_score:
+                best_score = s["score"]
+                best_slot = {"platform": plat, "hour": s["hour"]}
+
+    return {
+        "heatmap": data,
+        "global_min": round(global_min, 3),
+        "global_max": round(global_max, 3),
+        "personal_peak": best_slot,
+    }
+
+
+@app.get("/api/analytics/platform-breakdown/{creator_id}")
+def analytics_platform_breakdown(creator_id: str):
+    """Panel 3 — Platform × Content Type breakdown with affinity ratio."""
+    breakdown = {}
+    for platform in sorted(context.all_platforms):
+        for ct in sorted(context.all_content_types):
+            scores = []
+            best_slot = 0
+            best_val = -1
+            for hour in range(24):
+                val = history.get((creator_id, platform, ct, hour), 0)
+                scores.append(val)
+                if val > best_val:
+                    best_val = val
+                    best_slot = hour
+            avg = sum(scores) / len(scores) if scores else 0
+            breakdown[f"{platform}_{ct}"] = {
+                "platform": platform,
+                "content_type": ct,
+                "avg_engagement": round(avg, 3),
+                "peak_engagement": round(best_val, 3),
+                "best_slot": best_slot,
+            }
+
+    # Platform affinity ratio
+    ig_avg = sum(v for (cid, p, _, _), v in history.items() if cid == creator_id and p == "Instagram") / max(1, sum(1 for (cid, p, _, _) in history if cid == creator_id and p == "Instagram"))
+    yt_avg = sum(v for (cid, p, _, _), v in history.items() if cid == creator_id and p == "YouTube") / max(1, sum(1 for (cid, p, _, _) in history if cid == creator_id and p == "YouTube"))
+    ratio = round(ig_avg / yt_avg, 2) if yt_avg > 0 else 0
+    affinity_text = f"You perform {ratio}× better on Instagram than YouTube overall." if ratio > 1 else f"You perform {round(1/ratio, 2) if ratio > 0 else 0}× better on YouTube than Instagram overall."
+
+    return {
+        "breakdown": breakdown,
+        "ig_avg": round(ig_avg, 3),
+        "yt_avg": round(yt_avg, 3),
+        "affinity_ratio": ratio,
+        "affinity_text": affinity_text,
+    }
+
+
+@app.get("/api/analytics/content-history/{creator_id}")
+def analytics_content_history(creator_id: str):
+    """Panel 4 — Content Performance History table."""
+    creator_content = [c for c in content.values() if c.creator_id == creator_id]
+    rows = []
+    for item in sorted(creator_content, key=lambda c: int(c.content_id), reverse=True):
+        rec = next((r for r in all_recommendations if r["content_id"] == item.content_id), None)
+        ex = rec.get("explanation", {}) if rec else {}
+        current = ex.get("current_slot_score", 0)
+        optimal = ex.get("optimal_slot_score", 0)
+        gain = ((optimal - current) / current * 100) if current > 0 else 0
+
+        rows.append({
+            "content_id": item.content_id,
+            "content_type": item.content_type,
+            "submitted_hour": item.created_timestamp,
+            "time_sensitivity": item.time_sensitivity,
+            "platform": rec["platform"] if rec else None,
+            "recommended_slot": rec["recommended_slot"] if rec else None,
+            "decision": rec["decision"] if rec else "Pending",
+            "score": rec["score"] if rec else None,
+            "gain_pct": round(gain, 1),
+            "confidence": rec["confidence"] if rec else None,
+            "is_hook_score": item.content_type == "SHORT" and rec and rec["score"] > 75,
+        })
+    return rows
+
+
+@app.get("/api/analytics/timing-audit/{creator_id}")
+def analytics_timing_audit(creator_id: str):
+    """Panel 5 — Submission Timing Audit: gap between when you post vs when you should."""
+    creator_content = [c for c in content.values() if c.creator_id == creator_id]
+    creator_recs = [r for r in all_recommendations if r["creator_id"] == creator_id]
+
+    if not creator_content:
+        return {"error": "No content found"}
+
+    hours = [c.created_timestamp for c in creator_content]
+    avg_hour = sum(hours) / len(hours)
+
+    # Personal peak hour (from historical engagement)
+    slot_scores = {}
+    for (cid, _, _, slot), v in history.items():
+        if cid == creator_id:
+            slot_scores.setdefault(slot, []).append(v)
+    peak_hour = max(slot_scores, key=lambda s: sum(slot_scores[s]) / len(slot_scores[s])) if slot_scores else 12
+
+    # Peak window submissions (18-22)
+    peak_submissions = sum(1 for h in hours if 18 <= h <= 22)
+    peak_pct = round(peak_submissions / len(hours) * 100, 1)
+
+    # Avg gain across SCHEDULE decisions
+    sched_gains = []
+    for r in creator_recs:
+        ex = r.get("explanation", {})
+        current = ex.get("current_slot_score", 0)
+        optimal = ex.get("optimal_slot_score", 0)
+        if current > 0 and r["decision"] == "SCHEDULE":
+            sched_gains.append((optimal - current) / current * 100)
+    avg_gain = round(sum(sched_gains) / len(sched_gains), 1) if sched_gains else 0
+
+    # Hour distribution (24 bars)
+    distribution = [0] * 24
+    for h in hours:
+        distribution[h] += 1
+
+    # Personal engagement curve (24h)
+    engagement_curve = []
+    for h in range(24):
+        vals = [v for (cid, _, _, slot), v in history.items() if cid == creator_id and slot == h]
+        engagement_curve.append(round(sum(vals) / len(vals), 3) if vals else 0)
+
+    return {
+        "avg_submission_hour": round(avg_hour, 1),
+        "personal_peak_hour": peak_hour,
+        "gap_hours": abs(round(avg_hour - peak_hour)),
+        "peak_window_pct": peak_pct,
+        "avg_potential_gain": avg_gain,
+        "total_submissions": len(creator_content),
+        "scheduled_count": sum(1 for r in creator_recs if r["decision"] == "SCHEDULE"),
+        "posted_now_count": sum(1 for r in creator_recs if r["decision"] == "POST_NOW"),
+        "hour_distribution": distribution,
+        "engagement_curve": engagement_curve,
+    }
+
+
+@app.get("/api/analytics/optimizer-impact/{creator_id}")
+def analytics_optimizer_impact(creator_id: str):
+    """Panel 6 — Optimizer Impact: quantifies the system's value for this creator."""
+    creator_recs = [r for r in all_recommendations if r["creator_id"] == creator_id]
+    if not creator_recs:
+        return {"error": "No recommendations found"}
+
+    scores = [r["score"] for r in creator_recs]
+    best_score = max(scores)
+    best_rec = max(creator_recs, key=lambda r: r["score"])
+
+    # Compute submission scores and gains
+    uplifts = []
+    gains = []
+    for r in creator_recs:
+        ex = r.get("explanation", {})
+        current = ex.get("current_slot_score", 0)
+        optimal = ex.get("optimal_slot_score", 0)
+        if current > 0:
+            uplifts.append(optimal - current)
+            gains.append((optimal - current) / current * 100)
+
+    # Worst counterfactual
+    dna = dna_profiles.get(creator_id)
+    worst_score = min(scores) if scores else 0
+
+    # Confidence breakdown
+    high = sum(1 for r in creator_recs if r["confidence"] == "HIGH")
+    medium = sum(1 for r in creator_recs if r["confidence"] == "MEDIUM")
+    low = sum(1 for r in creator_recs if r["confidence"] == "LOW")
+
+    schedule_rate = sum(1 for r in creator_recs if r["decision"] == "SCHEDULE") / len(creator_recs) * 100
+
+    return {
+        "best_score": best_score,
+        "best_recommendation": {
+            "platform": best_rec["platform"],
+            "slot": best_rec["recommended_slot"],
+            "content_id": best_rec["content_id"],
+        },
+        "worst_score": worst_score,
+        "score_gap": round(best_score - worst_score, 1),
+        "avg_score_uplift": round(sum(uplifts) / len(uplifts), 2) if uplifts else 0,
+        "avg_gain_pct": round(sum(gains) / len(gains), 1) if gains else 0,
+        "max_single_gain": round(max(gains), 1) if gains else 0,
+        "schedule_rate_pct": round(schedule_rate, 1),
+        "confidence_breakdown": {"HIGH": high, "MEDIUM": medium, "LOW": low},
+        "total_recommendations": len(creator_recs),
+    }
+
+
 # ─── Run ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import uvicorn

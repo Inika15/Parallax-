@@ -7,6 +7,7 @@ import Optimize from './pages/Optimize'
 import Creators from './pages/Creators'
 import CreatorProfile from './pages/CreatorProfile'
 import Schedule from './pages/Schedule'
+import Analytics from './pages/Analytics'
 
 function App() {
   const [onboarded, setOnboarded] = useState(
@@ -26,6 +27,7 @@ function App() {
         <Route path="/creators" element={<Creators />} />
         <Route path="/creators/:id" element={<CreatorProfile />} />
         <Route path="/schedule" element={<Schedule />} />
+        <Route path="/analytics" element={<Analytics />} />
       </Routes>
     </div>
   )

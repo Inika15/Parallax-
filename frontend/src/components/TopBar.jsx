@@ -20,6 +20,7 @@ export default function TopBar() {
           <NavLink to="/optimize">Optimize</NavLink>
           <NavLink to="/creators">Creators</NavLink>
           <NavLink to="/schedule">Schedule</NavLink>
+          <NavLink to="/analytics">Analytics</NavLink>
         </nav>
         <div className="topbar-status">
           <span className={`status-dot ${live ? 'live' : ''}`} />

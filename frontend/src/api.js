@@ -48,3 +48,35 @@ export async function fetchCounterfactual(contentId) {
   const res = await fetch(`${API}/api/counterfactual/${contentId}`);
   return res.json();
 }
+
+// ── Analytics Endpoints ──────────────────────────────────
+
+export async function fetchAnalyticsScorecard(creatorId) {
+  const res = await fetch(`${API}/api/analytics/scorecard/${creatorId}`);
+  return res.json();
+}
+
+export async function fetchAnalyticsHeatmap(creatorId) {
+  const res = await fetch(`${API}/api/analytics/heatmap/${creatorId}`);
+  return res.json();
+}
+
+export async function fetchAnalyticsPlatformBreakdown(creatorId) {
+  const res = await fetch(`${API}/api/analytics/platform-breakdown/${creatorId}`);
+  return res.json();
+}
+
+export async function fetchAnalyticsContentHistory(creatorId) {
+  const res = await fetch(`${API}/api/analytics/content-history/${creatorId}`);
+  return res.json();
+}
+
+export async function fetchAnalyticsTimingAudit(creatorId) {
+  const res = await fetch(`${API}/api/analytics/timing-audit/${creatorId}`);
+  return res.json();
+}
+
+export async function fetchAnalyticsOptimizerImpact(creatorId) {
+  const res = await fetch(`${API}/api/analytics/optimizer-impact/${creatorId}`);
+  return res.json();
+}
