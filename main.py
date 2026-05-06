@@ -260,7 +260,7 @@ def run_pipeline(data_dir: str, output_path: str, verbose: bool = False):
 
         for si in items:
             try:
-                # Joint optimization with cooldown (Layer 2+4)
+                # Joint optimization with cooldown + sensitivity risk (Layer 2+4)
                 best_platform, best_slot, best_score, breakdown = (
                     joint_optimize_with_cooldown(
                         content_id=str(si.content_id),
@@ -268,6 +268,8 @@ def run_pipeline(data_dir: str, output_path: str, verbose: bool = False):
                         content_type=si.content_type,
                         context=context,
                         lock=lock,
+                        time_sensitivity=si.time_sensitivity,
+                        submission_hour=si.created_timestamp,
                     )
                 )
 
@@ -343,6 +345,9 @@ def run_pipeline(data_dir: str, output_path: str, verbose: bool = False):
                     "trajectory": trajectory["trend"],
                     "trajectory_factor": trajectory["trajectory_factor"],
                     "cooldown_respected": True,
+                    "sensitivity_risk": breakdown.get("sensitivity_risk", 0.0),
+                    "sensitivity_routing": breakdown.get("sensitivity_routing", "SAFE"),
+                    "velocity_bonus": breakdown.get("velocity_bonus", 0.0),
                     "score_trace": trace,
                     "natural_language": nl_explanation,
                 }

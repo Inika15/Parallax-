@@ -4,6 +4,7 @@ Postiz pattern: TERMINATE_EXISTING conflict policy — no double-scheduling.
 
 CreatorScheduleLock prevents cooldown violations.
 Batch processing groups items by creator, processes HIGH sensitivity first.
+Algorithm-aware sensitivity routing (from PS4 research doc).
 """
 
 import logging
@@ -15,6 +16,11 @@ from ..layer2_fusion.context import EngagementContext
 from ..layer3_personalization.creator_dna import CreatorDNA
 from ..layer4_scoring.scorer import compute_score
 from ..layer4_scoring.weights import DEFAULT_WEIGHTS, ScoringWeights
+from ..layer4_scoring.sensitivity_risk import (
+    compute_sensitivity_risk,
+    compute_first_hour_velocity_bonus,
+    get_sensitivity_routing_label,
+)
 from .affinity_matrix import get_content_platform_affinity
 
 logger = logging.getLogger(__name__)
@@ -67,11 +73,17 @@ def joint_optimize_with_cooldown(
     content_type: str,
     context: EngagementContext,
     lock: CreatorScheduleLock,
+    time_sensitivity: str = "Medium",
+    submission_hour: int = 12,
     weights: ScoringWeights = DEFAULT_WEIGHTS,
 ) -> Tuple[str, int, float, dict]:
     """
-    Joint optimization respecting cooldown constraints.
+    Joint optimization respecting cooldown + sensitivity risk.
     Returns (platform, slot, score, breakdown).
+    
+    Algorithm-aware routing (from PS4 research doc):
+      HIGH sensitivity content gets penalized at peak hours
+      to route it toward loyal-audience off-peak slots.
     """
     candidates = []
 
@@ -87,12 +99,27 @@ def joint_optimize_with_cooldown(
             ch = context.get_creator_history(creator_id, platform, content_type, slot)
             cb = context.get_base_engagement(creator_id)
 
-            score = compute_score(pa, ch, cb, content_fit, weights)
-            candidates.append((score, slot, platform, {
+            base_score = compute_score(pa, ch, cb, content_fit, weights)
+
+            # Algorithm-aware sensitivity risk (penalize sensitive content at peak)
+            risk_penalty = compute_sensitivity_risk(time_sensitivity, pa)
+            velocity_bonus = compute_first_hour_velocity_bonus(submission_hour, slot)
+            routing_label = get_sensitivity_routing_label(time_sensitivity, pa)
+
+            # Adjust score: subtract risk, add velocity bonus
+            adjusted_score = round(
+                max(0.0, base_score * (1.0 - risk_penalty) + velocity_bonus * 100),
+                2,
+            )
+
+            candidates.append((adjusted_score, slot, platform, {
                 "platform_activity_raw": pa,
                 "creator_history_raw": ch,
                 "creator_base_raw": cb,
                 "content_fit_raw": content_fit,
+                "sensitivity_risk": risk_penalty,
+                "velocity_bonus": velocity_bonus,
+                "sensitivity_routing": routing_label,
             }))
 
     if not candidates:
@@ -101,7 +128,7 @@ def joint_optimize_with_cooldown(
         return joint_optimize_with_cooldown(
             content_id, creator_id, content_type, context,
             CreatorScheduleLock(creator_id, 0),  # no cooldown
-            weights,
+            time_sensitivity, submission_hour, weights,
         )
 
     # Deterministic sort: highest score → earliest slot → alphabetical platform
@@ -111,3 +138,4 @@ def joint_optimize_with_cooldown(
     lock.reserve(best_slot)
 
     return best_platform, best_slot, best_score, best_breakdown
+
