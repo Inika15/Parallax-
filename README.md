@@ -1,9 +1,9 @@
 # Creator Content Posting Optimization System
 
 ## Team Information
-- **Team Name**: [Team Name]
-- **Year**: [Year]
-- **All-Female Team**: [Yes/No]
+- **Team Name**: Parallax
+- **Year**: [1st year
+- **All-Female Team**:YES
 
 ## Architecture Overview
 
