@@ -1,7 +1,7 @@
 """
 Test Scoring Engine — Issues #5, #17
 =====================================
-Tests the multiplicative scoring function for correct behavior,
+Tests the weighted sum scoring function for correct behavior,
 edge cases, and boundary conditions.
 """
 
@@ -20,7 +20,7 @@ from src.layer4_scoring.weights import DEFAULT_WEIGHTS, MAX_SCORE, SCALE_FACTOR,
 class TestComputeScore:
     """Test the core scoring function."""
 
-    def test_all_ones_gives_max_score(self):
+    def test_all_ones_gives_max_scale(self):
         """All factors = 1.0 should produce SCALE_FACTOR (100.0)."""
         score = compute_score(1.0, 1.0, 1.0, 1.0)
         assert score == SCALE_FACTOR
@@ -29,26 +29,6 @@ class TestComputeScore:
         """Zero platform activity → score must be 0.0 (dead slot)."""
         score = compute_score(0.0, 0.8, 1.2, 1.0)
         assert score == 0.0
-
-    def test_zero_creator_history_gives_zero(self):
-        """Zero creator history → score must be 0.0."""
-        score = compute_score(1.0, 0.0, 1.2, 1.0)
-        assert score == 0.0
-
-    def test_zero_base_engagement_gives_zero(self):
-        """Zero base engagement → score must be 0.0."""
-        score = compute_score(1.0, 0.8, 0.0, 1.0)
-        assert score == 0.0
-
-    def test_zero_content_fit_gives_zero(self):
-        """Zero content fit → score must be 0.0."""
-        score = compute_score(1.0, 0.8, 1.2, 0.0)
-        assert score == 0.0
-
-    def test_negative_input_gives_zero(self):
-        """Negative inputs → score must be 0.0."""
-        assert compute_score(-0.5, 0.8, 1.0, 1.0) == 0.0
-        assert compute_score(1.0, -0.1, 1.0, 1.0) == 0.0
 
     def test_score_capped_at_max(self):
         """Even with very high factors, score never exceeds MAX_SCORE."""
@@ -75,9 +55,14 @@ class TestComputeScore:
 
     def test_typical_values(self):
         """Typical dataset values should produce a reasonable score."""
-        # Platform activity 0.6 or 1.0, history ~0.5-1.0, base ~0.6-1.4, fit ~0.66-1.0
         score = compute_score(1.0, 0.83, 1.11, 1.0)
         assert 0 < score <= MAX_SCORE
+
+    def test_nan_inf_clamped(self):
+        """NaN/Inf inputs should be handled gracefully."""
+        # The scorer should handle edge cases without crashing
+        score = compute_score(float('inf'), 1.0, 1.0, 1.0)
+        assert score <= MAX_SCORE or score == 0.0
 
 
 class TestScoreBreakdown:

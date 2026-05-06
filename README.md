@@ -7,18 +7,14 @@
 
 ## Architecture Overview
 
-Our system uses a 6-layer multiplicative scoring architecture. For each content item, we jointly evaluate all 48 candidate combinations (2 platforms × 24 time slots) using a weighted geometric product of four signals:
+Our system uses a **6-layer architecture** with **joint 48-combination optimization** (2 platforms × 24 slots) per content item.
 
-**Optimal Posting Time:** We score every hour on every platform simultaneously. The joint optimizer picks the global best (platform, slot) pair — not just the best slot on one platform. Tie-breaking is deterministic: highest score → earliest slot → alphabetical platform.
+**Optimal posting time:** For each content item, we score all 48 (platform, slot) candidates using a weighted sum: `Score = W1×platform_activity + W2×creator_history + W3×base_engagement + W4×content_affinity` (W1=0.30, W2=0.40, W3=0.15, W4=0.15). The globally highest-scoring combination wins. Deterministic tie-breaking: highest score → earliest slot → alphabetical platform.
 
-**Platform Selection:** We derive content-type affinity from measured historical engagement means (SHORT averages 0.830 on Instagram vs 0.547 on YouTube). SHORT content routes to Instagram; LONG to YouTube — data-driven, not hardcoded.
+**Platform selection:** Derived from the joint optimizer — not hardcoded. Data-derived affinity matrix (SHORT→Instagram ≈1.206, LONG→YouTube ≈1.189) guides preference, but per-creator historical engagement (W2=0.40) can override when individual data contradicts the aggregate trend.
 
-**Balancing Signals:** The multiplicative formula — `PA^0.30 × CH^0.40 × CB^0.15 × CF^0.15 × 100` — weights creator-specific history most heavily (40%), ensuring a creator with strong personal engagement at an off-peak hour can outperform a generic peak slot. Zero on any factor tanks the score.
+**Balancing activity vs history:** Platform activity (step function: 0.6 or 1.0) provides a baseline bonus for peak windows. Creator history (continuous: 0.255–1.250) is weighted 33% higher, giving individual engagement patterns dominant influence over global platform trends.
 
-**Scheduling Decision:** We compare the optimal-slot score against the current-slot score using time-sensitivity-adjusted thresholds (High: 5%, Medium: 10%, Low: 20% improvement required). Urgent content posts sooner; flexible content waits for peak windows. Posts within 1 hour of optimal always post immediately.
-
----
-
-*Keep your description concise and focused on your core decision-making logic.*
+**POST_NOW vs SCHEDULE:** Time-sensitivity-aware thresholds (High=1.05×, Medium=1.10×, Low=1.20×). If optimal score exceeds current-slot score by the threshold, SCHEDULE. Submission at/near optimal slot → POST_NOW. Cooldown-aware batch scheduling prevents per-creator slot conflicts.
 
 **Note:** Please do not change the format or spelling of anything in this README. The fields are extracted using a script, so any changes to the structure or formatting may break the extraction process.

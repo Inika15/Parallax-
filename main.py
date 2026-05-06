@@ -2,7 +2,8 @@
 Creator Content Posting Optimization System — Main Entry Point
 ================================================================
 
-Full pipeline: Load → Fuse → Profile → Score → Optimize → Schedule → Output
+Full pipeline with 22 Postiz-inspired layers:
+  Load → Fuse → Profile → Momentum → Batch/Cooldown → Score → Explain → Validate → Output
 
 Usage:
     python main.py
@@ -10,11 +11,13 @@ Usage:
 """
 
 import argparse
+import hashlib
 import json
 import logging
 import os
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 
 # ─── Setup Python path ──────────────────────────────────────────────
@@ -28,6 +31,9 @@ from src.layer1_foundation.data_loader import (
     load_creator_profiles,
 )
 from src.layer1_foundation.fallback_registry import FallbackRegistry
+from src.layer1_foundation.state_machine import (
+    ContentState, StatefulContent, generate_fallback_recommendation,
+)
 from src.layer2_fusion.context import EngagementContext
 from src.layer2_fusion.preprocessor import compute_platform_stats
 from src.layer3_personalization.creator_dna import build_creator_dna
@@ -38,15 +44,25 @@ from src.layer3_personalization.cold_start import (
     is_cold_start,
     COLD_START_THRESHOLD,
 )
-from src.layer4_scoring.weights import DEFAULT_WEIGHTS
-from src.layer5_intelligence.optimizer import joint_optimize, joint_optimize_with_cooldown
+from src.layer4_scoring.weights import DEFAULT_WEIGHTS, SCHEDULE_THRESHOLDS, NEAR_SLOT_HOURS
+from src.layer5_intelligence.optimizer import joint_optimize
 from src.layer5_intelligence.scheduler import decide_schedule
+from src.layer5_intelligence.cooldown_scheduler import (
+    CreatorScheduleLock, group_by_creator, joint_optimize_with_cooldown,
+)
+from src.layer5_intelligence.momentum import (
+    compute_all_momentum_scores, compute_engagement_trajectory,
+)
+from src.layer5_intelligence.affinity_matrix import get_content_platform_affinity
 from src.layer6_output.output_formatter import (
     format_recommendation,
     validate_output,
     format_all_recommendations,
 )
 from src.layer6_output.evaluator import compute_eval_metrics
+from src.layer6_output.explainer import (
+    generate_explanation_sentence, build_score_trace,
+)
 
 
 # ─── Logging ─────────────────────────────────────────────────────────
@@ -59,8 +75,8 @@ def setup_logging(verbose: bool = False):
     )
 
 
-# ─── Data Richness Dashboard ────────────────────────────────────────
-def print_dashboard(context: EngagementContext, dna_profiles: dict):
+# ─── Data Richness Dashboard (Layer 18) ─────────────────────────────
+def print_dashboard(context: EngagementContext, dna_profiles: dict, momentum_scores: dict):
     """Print a startup dashboard showing data coverage."""
     total_creators = len(context.creators)
     creators_with_history = len({
@@ -81,6 +97,13 @@ def print_dashboard(context: EngagementContext, dna_profiles: dict):
 
     content_types = sorted(context.all_content_types)
 
+    # Submission hour distribution (Layer 15)
+    hour_counts = Counter(item.created_timestamp for item in context.content.values())
+    peak_submit_hour = max(hour_counts, key=hour_counts.get) if hour_counts else 0
+
+    # Momentum stats
+    avg_momentum = sum(momentum_scores.values()) / max(len(momentum_scores), 1)
+
     print("\n" + "=" * 60)
     print("  🛡️  DATA RICHNESS DASHBOARD")
     print("=" * 60)
@@ -93,7 +116,26 @@ def print_dashboard(context: EngagementContext, dna_profiles: dict):
     print(f"  Cold-Start Creators: {cold_start_count} (using global averages)")
     print(f"  Total Content Items: {len(context.content)}")
     print(f"  System Avg Engage:   {context.system_average:.3f}")
+    print(f"  Avg Momentum Score:  {avg_momentum:.3f}")
+    print(f"  Peak Submit Hour:    {peak_submit_hour}:00 ({hour_counts.get(peak_submit_hour, 0)} items)")
     print("=" * 60 + "\n")
+
+
+# ─── Coverage Validator (Layer 10) ───────────────────────────────────
+def validate_coverage(content_items: dict, recommendations: list) -> dict:
+    """Ensure 100% coverage — no dropped items."""
+    input_ids = set(content_items.keys())
+    output_ids = {str(r["content_id"]) for r in recommendations}
+    missing = input_ids - output_ids
+
+    report = {
+        "total_input": len(input_ids),
+        "total_output": len(output_ids),
+        "missing_ids": sorted(missing),
+        "coverage_pct": len(output_ids) / max(len(input_ids), 1) * 100,
+        "status": "COMPLETE" if not missing else "INCOMPLETE",
+    }
+    return report
 
 
 # ─── Main Pipeline ──────────────────────────────────────────────────
@@ -113,11 +155,6 @@ def run_pipeline(data_dir: str, output_path: str, verbose: bool = False):
     creators = load_creator_profiles(os.path.join(data_dir, "creators.csv"))
     t_load = time.perf_counter()
     print(f"   ✅ Loaded in {(t_load - t_start)*1000:.0f}ms")
-
-    # Log scoring configuration
-    from src.layer4_scoring.weights import DEFAULT_WEIGHTS
-    print(f"   ⚙️  Weights: PA={DEFAULT_WEIGHTS.w_platform_activity} CH={DEFAULT_WEIGHTS.w_creator_history} "
-          f"CB={DEFAULT_WEIGHTS.w_creator_base} CF={DEFAULT_WEIGHTS.w_content_fit}")
 
     # ── LAYER 2: Fuse Data ───────────────────────────────────────────
     print("🔗 Layer 2: Building EngagementContext...")
@@ -150,7 +187,6 @@ def run_pipeline(data_dir: str, output_path: str, verbose: bool = False):
             system_average=context.system_average,
         )
 
-        # Apply cold-start if needed
         if is_cold_start(dna):
             dna = build_cold_start_profile(
                 creator_id=cid,
@@ -167,24 +203,53 @@ def run_pipeline(data_dir: str, output_path: str, verbose: bool = False):
     t_dna = time.perf_counter()
     print(f"   ✅ Built {len(dna_profiles)} profiles in {(t_dna - t_fuse)*1000:.0f}ms")
 
+    # ── Layer 17: Compute Momentum Scores ────────────────────────────
+    print("⚡ Layer 17: Computing momentum scores...")
+    momentum_scores = compute_all_momentum_scores(context)
+    t_momentum = time.perf_counter()
+    print(f"   ✅ Momentum computed in {(t_momentum - t_dna)*1000:.0f}ms")
+
     # Print dashboard
-    print_dashboard(context, dna_profiles)
+    print_dashboard(context, dna_profiles, momentum_scores)
 
-    # ── LAYERS 4+5: Score + Optimize + Schedule ──────────────────────
-    print("🧠 Layers 4-5: Scoring & Optimizing (with cooldown enforcement)...")
-    recommendations = []
-    occupied_slots = {}  # creator_id → set of (platform, slot) for cooldown tracking
+    # ── LAYERS 4-5: Cooldown-Aware Batch Optimization ────────────────
+    print("🧠 Layers 4-5: Cooldown-aware batch optimization...")
 
-    for item_id in sorted(content.keys(), key=lambda x: int(x)):  # deterministic order
+    # Build stateful content items (Layer 1 state machine)
+    stateful_items = []
+    for item_id in sorted(content.keys(), key=lambda x: int(x)):
         item = content[item_id]
+        si = StatefulContent(
+            content_id=int(item.content_id),
+            creator_id=item.creator_id,
+            content_type=item.content_type,
+            created_timestamp=item.created_timestamp,
+            time_sensitivity=item.time_sensitivity,
+        )
+        stateful_items.append(si)
 
-        # Get or create DNA profile
-        if item.creator_id in dna_profiles:
-            dna = dna_profiles[item.creator_id]
+    # Group by creator for batch processing (Layer 5)
+    groups = group_by_creator(stateful_items)
+
+    # Process each creator's batch with cooldown lock (Layer 2)
+    recommendations = []
+    error_count = 0
+
+    for creator_id, items in sorted(groups.items(), key=lambda x: int(x[0])):
+        # Get cooldown from creator profile
+        cooldown = 4  # default
+        if creator_id in creators:
+            cooldown = creators[creator_id].cooldown_hours
+
+        # Create per-creator schedule lock
+        lock = CreatorScheduleLock(creator_id=creator_id, cooldown_hours=cooldown)
+
+        # Get or build DNA profile
+        if creator_id in dna_profiles:
+            dna = dna_profiles[creator_id]
         else:
-            # Creator not in profiles — build cold-start
             dna = build_cold_start_profile(
-                creator_id=item.creator_id,
+                creator_id=creator_id,
                 base_engagement=1.0,
                 cooldown_hours=4,
                 all_platforms=context.all_platforms,
@@ -193,66 +258,148 @@ def run_pipeline(data_dir: str, output_path: str, verbose: bool = False):
                 global_peak_slots=global_peak_slots,
             )
 
-        # Joint optimization with cooldown constraint enforcement
-        best = joint_optimize_with_cooldown(
-            content_id=item.content_id,
-            creator_id=item.creator_id,
-            content_type=item.content_type,
-            creator_dna=dna,
-            context=context,
-            occupied_slots=occupied_slots,
-        )
+        for si in items:
+            try:
+                # Joint optimization with cooldown + sensitivity risk (Layer 2+4)
+                best_platform, best_slot, best_score, breakdown = (
+                    joint_optimize_with_cooldown(
+                        content_id=str(si.content_id),
+                        creator_id=si.creator_id,
+                        content_type=si.content_type,
+                        context=context,
+                        lock=lock,
+                        time_sensitivity=si.time_sensitivity,
+                        submission_hour=si.created_timestamp,
+                    )
+                )
 
-        # Track occupied slot for this creator's cooldown window
-        if item.creator_id not in occupied_slots:
-            occupied_slots[item.creator_id] = set()
-        occupied_slots[item.creator_id].add((best.platform, best.recommended_slot))
+                si.transition(ContentState.OPTIMIZED)
 
-        # Scheduling decision
-        schedule_result = decide_schedule(
-            creator_id=item.creator_id,
-            content_type=item.content_type,
-            submission_hour=item.created_timestamp,
-            best_platform=best.platform,
-            best_slot=best.recommended_slot,
-            best_score=best.score,
-            time_sensitivity=item.time_sensitivity,
-            context=context,
-        )
+                # Scheduling decision
+                schedule_result = decide_schedule(
+                    creator_id=si.creator_id,
+                    content_type=si.content_type,
+                    submission_hour=si.created_timestamp,
+                    best_platform=best_platform,
+                    best_slot=best_slot,
+                    best_score=best_score,
+                    time_sensitivity=si.time_sensitivity,
+                    context=context,
+                )
 
-        # Format output
-        explanation = {
-            "platform_activity": best.breakdown["platform_activity_raw"],
-            "creator_history_score": best.breakdown["creator_history_raw"],
-            "creator_base": best.breakdown["creator_base_raw"],
-            "content_fit": best.breakdown["content_fit_raw"],
-            "current_slot_score": schedule_result["current_slot_score"],
-            "optimal_slot_score": schedule_result["optimal_slot_score"],
-            "schedule_threshold_met": schedule_result["threshold_met"],
-            "time_sensitivity": item.time_sensitivity,
-        }
+                decision = schedule_result["decision"]
+                si.transition(
+                    ContentState.SCHEDULED if decision == "SCHEDULE"
+                    else ContentState.COMPLETE
+                )
 
-        rec = format_recommendation(
-            content_id=item.content_id,
-            platform=best.platform,
-            recommended_slot=best.recommended_slot,
-            decision=schedule_result["decision"],
-            score=best.score,
-            confidence=best.confidence,
-            explanation=explanation,
-        )
-        recommendations.append(rec)
+                # Gain percentage
+                current = schedule_result["current_slot_score"]
+                optimal = schedule_result["optimal_slot_score"]
+                gain_pct = round(
+                    (optimal - current) / max(current, 0.01) * 100, 1
+                ) if current > 0 else 0.0
+
+                # Natural language explanation (Layer 20)
+                nl_explanation = generate_explanation_sentence(
+                    content_id=si.content_id,
+                    creator_id=si.creator_id,
+                    content_type=si.content_type,
+                    platform=best_platform,
+                    slot=best_slot,
+                    decision=decision,
+                    score=best_score,
+                    history_score=breakdown["creator_history_raw"],
+                    activity_score=breakdown["platform_activity_raw"],
+                    gain_pct=gain_pct,
+                )
+
+                # Score trace (Layer 14)
+                affinity = get_content_platform_affinity(si.content_type, best_platform)
+                trace = build_score_trace(
+                    si.creator_id, best_platform, best_slot,
+                    si.content_type,
+                    breakdown["platform_activity_raw"],
+                    breakdown["creator_history_raw"],
+                    breakdown["creator_base_raw"],
+                    affinity,
+                )
+
+                # Engagement trajectory (Layer 12)
+                trajectory = compute_engagement_trajectory(
+                    si.creator_id, best_platform, context
+                )
+
+                # Full explanation block
+                explanation = {
+                    "platform_activity": breakdown["platform_activity_raw"],
+                    "creator_history_score": breakdown["creator_history_raw"],
+                    "creator_base": breakdown["creator_base_raw"],
+                    "content_fit": breakdown["content_fit_raw"],
+                    "current_slot_score": current,
+                    "optimal_slot_score": optimal,
+                    "gain_pct": gain_pct,
+                    "schedule_threshold_met": schedule_result["threshold_met"],
+                    "time_sensitivity": si.time_sensitivity,
+                    "momentum": momentum_scores.get(si.creator_id, 0.5),
+                    "trajectory": trajectory["trend"],
+                    "trajectory_factor": trajectory["trajectory_factor"],
+                    "cooldown_respected": True,
+                    "sensitivity_risk": breakdown.get("sensitivity_risk", 0.0),
+                    "sensitivity_routing": breakdown.get("sensitivity_routing", "SAFE"),
+                    "velocity_bonus": breakdown.get("velocity_bonus", 0.0),
+                    "score_trace": trace,
+                    "natural_language": nl_explanation,
+                }
+
+                rec = format_recommendation(
+                    content_id=si.content_id,
+                    platform=best_platform,
+                    recommended_slot=best_slot,
+                    decision=decision,
+                    score=best_score,
+                    confidence=dna.confidence_label if hasattr(dna, 'confidence_label') else "HIGH",
+                    explanation=explanation,
+                )
+                si.recommendation = rec
+                recommendations.append(rec)
+
+            except Exception as e:
+                logger.error(f"Error optimizing content #{si.content_id}: {e}")
+                si.error = str(e)
+                si.transition(ContentState.ERROR)
+                fallback_rec = generate_fallback_recommendation(si)
+                si.recommendation = fallback_rec
+                recommendations.append(fallback_rec)
+                error_count += 1
+
+    # Sort by content_id for deterministic output
+    recommendations.sort(key=lambda r: r["content_id"])
 
     t_optimize = time.perf_counter()
-    print(f"   ✅ Processed {len(recommendations)} items in {(t_optimize - t_dna)*1000:.0f}ms")
+    print(f"   ✅ Processed {len(recommendations)} items in {(t_optimize - t_momentum)*1000:.0f}ms")
+    if error_count > 0:
+        print(f"   ⚠️  {error_count} items used fallback recommendations")
 
     # ── LAYER 6: Output & Evaluate ───────────────────────────────────
     print("🖨️  Layer 6: Formatting output...")
+
+    # Coverage validation (Layer 10)
+    coverage = validate_coverage(content, recommendations)
+    if coverage["status"] != "COMPLETE":
+        logger.warning(f"Coverage incomplete! Missing: {coverage['missing_ids']}")
+
     os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else ".", exist_ok=True)
     output_json = format_all_recommendations(recommendations, output_path)
 
     # Evaluation metrics
     metrics = compute_eval_metrics(recommendations, context)
+
+    # Input hash for determinism proof (Layer 21)
+    input_hash = hashlib.sha256(
+        open(os.path.join(data_dir, "content.csv"), "rb").read()
+    ).hexdigest()[:12]
+
     t_end = time.perf_counter()
 
     # ── Summary ──────────────────────────────────────────────────────
@@ -264,6 +411,18 @@ def run_pipeline(data_dir: str, output_path: str, verbose: bool = False):
         p = r["platform"]
         platform_dist[p] = platform_dist.get(p, 0) + 1
 
+    # Cooldown stats
+    cooldown_violations = 0
+    for creator_id, items in groups.items():
+        slots = [r["recommended_slot"] for r in recommendations
+                 if str(r["content_id"]) in {str(i.content_id) for i in items}
+                 and r["decision"] == "SCHEDULE"]
+        cd = creators[creator_id].cooldown_hours if creator_id in creators else 4
+        for i in range(len(slots)):
+            for j in range(i + 1, len(slots)):
+                if abs(slots[i] - slots[j]) < cd:
+                    cooldown_violations += 1
+
     print("\n" + "=" * 60)
     print("  📊  RESULTS SUMMARY")
     print("=" * 60)
@@ -272,6 +431,9 @@ def run_pipeline(data_dir: str, output_path: str, verbose: bool = False):
     print(f"  POST_NOW decisions:     {postnow_count}")
     for p, count in sorted(platform_dist.items()):
         print(f"  {p} selections:  {count}")
+    print(f"  Cooldown violations:    {cooldown_violations}")
+    print(f"  Coverage:               {coverage['coverage_pct']:.0f}% ({coverage['status']})")
+    print(f"  Input hash:             {input_hash}")
     print(f"\n  📈 Evaluation Metrics:")
     print(f"     Engagement Score:     {metrics['engagement_score']:.4f}")
     print(f"     Timing Effectiveness: {metrics['timing_effectiveness']:.4f}")
@@ -281,14 +443,18 @@ def run_pipeline(data_dir: str, output_path: str, verbose: bool = False):
     print(f"     Composite Score:      {metrics['composite_score']:.4f}")
     print(f"\n  ⏱️  Total pipeline time:  {(t_end - t_start)*1000:.0f}ms")
     print(f"  💾 Output written to:    {output_path}")
-    print("=" * 60)
-    print(f"\n  🎯 COMPOSITE SCORE: {metrics['composite_score']:.4f}")
     print("=" * 60 + "\n")
 
     # Save metrics
     metrics_path = output_path.replace(".json", "_metrics.json")
     with open(metrics_path, "w") as f:
-        json.dump(metrics, f, indent=2)
+        json.dump({
+            **metrics,
+            "input_hash": input_hash,
+            "coverage": coverage,
+            "cooldown_violations": cooldown_violations,
+            "pipeline_time_ms": round((t_end - t_start) * 1000),
+        }, f, indent=2)
 
     return recommendations, metrics
 

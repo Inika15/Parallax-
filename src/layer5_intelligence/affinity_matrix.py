@@ -1,23 +1,33 @@
 """
 Layer 5 — Content-Type × Platform Affinity Matrix
 
-Data-derived from historical engagement means:
-  Instagram SHORT mean: 0.830  |  YouTube SHORT mean: 0.547
-  Instagram LONG mean:  0.551  |  YouTube LONG mean:  0.807
+From how_to_win.md — normalize around the mean:
+  Instagram SHORT mean: 0.830 ; YouTube SHORT mean: 0.547
+  mean_short = (0.830 + 0.547) / 2 = 0.6885
 
-Affinity = 1.0 for natural fit, ~0.66 for mismatch.
+  YouTube LONG mean:  0.807 ; Instagram LONG mean:  0.551
+  mean_long = (0.807 + 0.551) / 2 = 0.679
+
+  AFFINITY = {
+    (SHORT, Instagram): 0.830 / 0.6885 ≈ 1.206
+    (SHORT, YouTube):   0.547 / 0.6885 ≈ 0.794
+    (LONG,  YouTube):   0.807 / 0.679  ≈ 1.188
+    (LONG,  Instagram): 0.551 / 0.679  ≈ 0.812
+  }
 """
 
 from typing import Dict, Tuple
 
-# Data-derived affinity matrix (from ps4_logic.md)
-# SHORT → Instagram is baseline 1.0 ; YouTube SHORT = 0.547/0.830 ≈ 0.659
-# LONG  → YouTube is baseline 1.0 ;  Instagram LONG = 0.551/0.807 ≈ 0.682
+# Data-derived affinity matrix (from how_to_win.md)
+# Normalized around the mean engagement per content type
+_MEAN_SHORT = (0.830 + 0.547) / 2  # 0.6885
+_MEAN_LONG = (0.807 + 0.551) / 2   # 0.679
+
 _AFFINITY_MATRIX: Dict[Tuple[str, str], float] = {
-    ("SHORT", "Instagram"): 1.0,
-    ("SHORT", "YouTube"):   0.659,   # 0.547 / 0.830
-    ("LONG",  "YouTube"):   1.0,
-    ("LONG",  "Instagram"): 0.682,   # 0.551 / 0.807
+    ("SHORT", "Instagram"): round(0.830 / _MEAN_SHORT, 3),  # ≈ 1.206
+    ("SHORT", "YouTube"):   round(0.547 / _MEAN_SHORT, 3),  # ≈ 0.794
+    ("LONG",  "YouTube"):   round(0.807 / _MEAN_LONG, 3),   # ≈ 1.189
+    ("LONG",  "Instagram"): round(0.551 / _MEAN_LONG, 3),   # ≈ 0.811
 }
 
 DEFAULT_AFFINITY = 1.0
