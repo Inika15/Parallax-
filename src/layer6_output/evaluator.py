@@ -86,7 +86,7 @@ def _compute_platform_quality(recs: List[Dict], context) -> float:
     """
     affinities = []
     for r in recs:
-        content_item = context.get_content_item(r.get("content_id", ""))
+        content_item = context.get_content_item(str(r.get("content_id", "")))
         if content_item:
             affinity = get_content_platform_affinity(
                 content_item.content_type, r.get("platform", "")

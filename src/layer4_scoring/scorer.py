@@ -58,13 +58,16 @@ def compute_score(
         + weights.w_content_fit * content_fit
     )
 
-    # Theoretical max: PA=1.0, CH=1.25, CB=1.38, CF=1.21
-    # max_raw = 0.30*1.0 + 0.40*1.25 + 0.15*1.38 + 0.15*1.21 = 1.1885
+    # Practical max: in real data, all four factors rarely hit their
+    # individual peaks simultaneously (they peak at different slots).
+    # Realistic best case: PA=1.0, CH≈1.05, CB≈1.15, CF≈1.10
+    # practical_max ≈ 0.30*1.0 + 0.40*1.05 + 0.15*1.15 + 0.15*1.10 = 1.0575
+    # We use 1.06 to keep top scores near but not always at 100.
     max_raw = (
         weights.w_platform_activity * 1.0
-        + weights.w_creator_history * 1.25
-        + weights.w_creator_base * 1.38
-        + weights.w_content_fit * 1.21
+        + weights.w_creator_history * 1.05
+        + weights.w_creator_base * 1.15
+        + weights.w_content_fit * 1.10
     )
 
     score = (raw / max_raw) * SCALE_FACTOR
