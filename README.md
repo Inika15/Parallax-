@@ -21,7 +21,7 @@ Our system uses a **6-layer architecture** with **joint 48-combination optimizat
 
 ---
 
-## 🚀 Quick Start
+##  Quick Start
 
 ```bash
 # 1. Install dependencies
@@ -44,7 +44,7 @@ cd frontend && npm install && npm run dev
 
 ---
 
-## 🏗️ System Architecture
+##  System Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -135,7 +135,7 @@ parallax/
 
 ---
 
-## 🛠️ Tech Stack
+##  Tech Stack
 
 | Component | Technology | Purpose |
 |-----------|-----------|---------|
@@ -149,7 +149,7 @@ parallax/
 
 ---
 
-## 📊 Evaluation Metrics
+## Evaluation Metrics
 
 | Metric | Score | Description |
 |--------|-------|-------------|
@@ -161,7 +161,7 @@ parallax/
 
 ---
 
-## 🔑 Key Design Decisions
+##  Key Design Decisions
 
 | Decision | Rationale |
 |----------|-----------|
@@ -175,7 +175,7 @@ parallax/
 
 ---
 
-## 🖥️ Frontend Features
+##  Frontend Features
 
 | Page | Features |
 |------|----------|
@@ -187,7 +187,7 @@ parallax/
 
 ---
 
-## 🧪 Testing
+##  Testing
 
 ```bash
 # Run all tests
@@ -203,7 +203,7 @@ python tests/test_api.py            # API endpoint validation
 
 ---
 
-## 📝 API Endpoints
+##  API Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
